@@ -1,19 +1,33 @@
 #!/bin/bash
-
 # OpenWebUI + llama.cpp Auto-Setup Script
 # For Proxmox Docker VMs
-
 set -e
 
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
-   echo "This script must be run as root"
-   exit 1
+    echo "This script must be run as root"
+    exit 1
 fi
 
 # Install dependencies
 apt-get update
-apt-get install -y curl whiptail docker.io docker-compose-v2
+apt-get install -y curl whiptail ca-certificates gnupg lsb-release
+
+# Add Docker's official GPG key
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Add Docker's APT repository
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/debian $(lsb_release -cs) stable" | \
+tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Update package index with Docker repo
+apt-get update
+
+# Install Docker Engine and Docker Compose v2
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Start Docker service
 systemctl enable --now docker
@@ -36,7 +50,7 @@ WEBUI_PORT=$(whiptail --title "Port Configuration" --inputbox "Enter OpenWebUI p
 
 # GPU acceleration
 if whiptail --title "GPU Acceleration" --yesno "Enable GPU acceleration? (NVIDIA only)" 10 60; then
-    GPU_CONFIG="    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: 1\n              capabilities: [gpu]"
+    GPU_CONFIG=" deploy:\n resources:\n reservations:\n devices:\n - driver: nvidia\n count: 1\n capabilities: [gpu]"
 else
     GPU_CONFIG=""
 fi
@@ -46,55 +60,20 @@ whiptail --title "Downloading Model" --infobox "Downloading model... This may ta
 curl -L -o /opt/openwebui/models/model.gguf "$MODEL_URL"
 
 # Create docker-compose.yml
-cat > /opt/openwebui/docker-compose.yml <<EOF
+cat > /opt/openwebui/docker-compose.yml << EOF
 version: '3.8'
 services:
-  open-webui:
+  openwebui:
     image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    restart: unless-stopped
-    privileged: true
-    environment:
-      - OLLAMA_BASE_URL=http://llama-cpp:8000
-      - WEBUI_SECRET_KEY=$SECRET_KEY
+    container_name: openwebui
     volumes:
-      - ./data:/app/backend/data
+      - /opt/openwebui/data:/app/backend/data
+      - /opt/openwebui/models:/app/backend/models
     ports:
-      - "$WEBUI_PORT:8080"
-    depends_on:
-      - llama-cpp
-    networks:
-      - app-network
-
-  llama-cpp:
-    image: ghcr.io/ggerganov/llama.cpp:server
-    container_name: llama-cpp
-    restart: unless-stopped
-    privileged: true
+      - "${WEBUI_PORT}:8080"
     environment:
-      - LLAMA_CPP_SERVER_PORT=8000
-      - MODEL_PATH=/models/model.gguf
-    volumes:
-      - ./models:/models
-    devices:
-      - /dev/kvm:/dev/kvm
-    cap_add:
-      - ALL
-    security_opt:
-      - apparmor:unconfined
-      - seccomp:unconfined
-    networks:
-      - app-network
-$GPU_CONFIG
-
-networks:
-  app-network:
-    driver: bridge
+      - SECRET_KEY=${SECRET_KEY}
+    restart: unless-stopped${GPU_CONFIG}
 EOF
 
-# Start containers
-cd /opt/openwebui
-docker compose up -d
-
-# Show completion message
-whiptail --title "Setup Complete!" --msgbox "OpenWebUI is now running at:\nhttp://$(hostname -I | awk '{print $1}'):$WEBUI_PORT\n\nSecret key: $SECRET_KEY\n\nData stored in: /opt/openwebui" 15 60
+echo "Setup complete! Navigate to /opt/openwebui and run 'docker compose up -d' to start OpenWebUI."
