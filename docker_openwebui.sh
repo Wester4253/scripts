@@ -23,11 +23,8 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 https://download.docker.com/linux/debian $(lsb_release -cs) stable" | \
 tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Update package index with Docker repo
-apt-get update
-
-# Install Docker Engine and Docker Compose v2
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+# Install Docker Engine and Docker Compose v2 (update and install in one step)
+apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Start Docker service
 systemctl enable --now docker
@@ -55,9 +52,13 @@ else
     GPU_CONFIG=""
 fi
 
-# Download model
-whiptail --title "Downloading Model" --infobox "Downloading model... This may take a while." 10 60
-curl -L -o /opt/openwebui/models/model.gguf "$MODEL_URL"
+# Download model with resume capability and progress display
+whiptail --title "Downloading Model" --infobox "Downloading model... This may take a while. Download will resume if interrupted." 10 60
+if ! curl -L -C - --progress-bar -o /opt/openwebui/models/model.gguf "$MODEL_URL" 2>&1 | \
+    stdbuf -oL tr '\r' '\n' | grep -o '[0-9]*\.[0-9]' | tail -1; then
+    echo "Error: Failed to download model"
+    exit 1
+fi
 
 # Create docker-compose.yml
 cat > /opt/openwebui/docker-compose.yml << EOF

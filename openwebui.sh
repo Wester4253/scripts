@@ -4,26 +4,29 @@
 # Exit on errors
 set -e
 
-echo "[1/7] Updating system..."
-apt update && apt upgrade -y
+echo "[1/6] Installing dependencies..."
+apt update && apt install -y git python3 python3-pip python3-venv build-essential curl
 
-echo "[2/7] Installing dependencies..."
-apt install -y git python3 python3-pip python3-venv build-essential curl
-
-echo "[3/7] Cloning OpenWebUI..."
+echo "[2/6] Cloning OpenWebUI..."
 cd /root
 if [ ! -d OpenWebUI ]; then
-    git clone https://github.com/oobabooga/OpenWebUI.git
+    if ! git clone https://github.com/oobabooga/OpenWebUI.git; then
+        echo "Error: Failed to clone OpenWebUI repository"
+        exit 1
+    fi
 fi
 cd OpenWebUI
 
-echo "[4/7] Setting up Python virtual environment..."
+echo "[3/6] Setting up Python virtual environment..."
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
+if ! pip install -r requirements.txt; then
+    echo "Error: Failed to install Python requirements"
+    exit 1
+fi
 
-echo "[5/7] Creating systemd service..."
+echo "[4/6] Creating systemd service..."
 cat <<EOF > /etc/systemd/system/openwebui.service
 [Unit]
 Description=OpenWebUI Service
@@ -40,10 +43,10 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-echo "[6/7] Enabling and starting service..."
+echo "[5/6] Enabling and starting service..."
 systemctl daemon-reload
 systemctl enable openwebui
 systemctl start openwebui
 
-echo "[7/7] Setup complete!"
+echo "[6/6] Setup complete!"
 echo "OpenWebUI should now be running at: http://$(hostname -I | awk '{print $1}'):7860"
