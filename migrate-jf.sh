@@ -1,53 +1,41 @@
 #!/bin/bash
 set -e
 
-echo "📦 Jellyfin Migration Script Starting..."
+# === CONFIG ===
+BACKUP_ZIP="/mnt/usb/bu.zip"
+JELLYFIN_DIR="/var/lib/jellyfin"
+TMP_DIR="/tmp/jf-migrate"
 
-ZIP_PATH="/mnt/usb/bu.zip"
-TARGET_DIR="/var/lib/jellyfin"
-SERVICE="jellyfin"
+echo "🧩 Jellyfin migration starting..."
+echo "Backup file: $BACKUP_ZIP"
+echo "Destination: $JELLYFIN_DIR"
 
-# Sanity checks
-if [ ! -f "$ZIP_PATH" ]; then
-    echo "❌ Backup zip not found at $ZIP_PATH"
-    exit 1
-fi
+# Stop Jellyfin service
+echo "⏹️ Stopping Jellyfin..."
+sudo systemctl stop jellyfin
 
-if [ ! -d "$TARGET_DIR" ]; then
-    echo "❌ Target directory $TARGET_DIR not found — is Jellyfin installed?"
-    exit 1
-fi
+# Create temp directory
+rm -rf "$TMP_DIR"
+mkdir -p "$TMP_DIR"
 
-echo "🛑 Stopping Jellyfin service..."
-systemctl stop $SERVICE
+# Unzip backup
+echo "📦 Extracting backup..."
+sudo unzip -o "$BACKUP_ZIP" -d "$TMP_DIR"
 
-echo "🧹 Clearing existing Jellyfin data directory..."
-rm -rf "${TARGET_DIR:?}/"*
+# Move extracted config (ProgramData equivalent)
+echo "🗂️ Replacing Jellyfin configuration..."
+sudo rsync -avh --delete "$TMP_DIR/" "$JELLYFIN_DIR/"
 
-echo "📂 Extracting backup..."
-unzip -q "$ZIP_PATH" -d "$TARGET_DIR"
-
+# Fix permissions (important!)
 echo "🔧 Fixing permissions..."
-chown -R jellyfin:jellyfin "$TARGET_DIR"
+sudo chown -R jellyfin:jellyfin "$JELLYFIN_DIR"
 
-echo "🚀 Starting Jellyfin service..."
-systemctl start $SERVICE
+# Cleanup
+rm -rf "$TMP_DIR"
 
-sleep 5
+# Restart Jellyfin
+echo "🚀 Restarting Jellyfin..."
+sudo systemctl start jellyfin
 
-echo "🩺 Checking Jellyfin status..."
-if systemctl is-active --quiet $SERVICE; then
-    echo "✅ Jellyfin service is running."
-else
-    echo "❌ Jellyfin service failed to start. Check logs with: journalctl -u jellyfin -n 50"
-    exit 1
-fi
-
-echo "🌐 Trying to reach Jellyfin web UI (localhost:8096)..."
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:8096 | grep -q 200; then
-    echo "🎉 Jellyfin is online and responding!"
-else
-    echo "⚠️ Could not confirm web response — open http://<your-LXC-IP>:8096 manually to verify."
-fi
-
-echo "✅ Migration complete! Enjoy your fully restored Jellyfin setup."
+echo "✅ Migration complete!"
+echo "Try accessing Jellyfin at http://<your-lxc-ip>:8096"
